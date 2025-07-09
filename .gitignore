@@ -1,0 +1,45 @@
+node_modules
+
+node_modules
+.env
+coverage
+coverage.json
+typechain
+typechain-types
+
+# Hardhat files
+cache
+artifacts
+
+# debug
+contracts-dbg/*
+dbg.project.json
+
+# IDE
+.vscode/*
+
+# Remix
+/.deps
+/.deploys
+
+/secrets.json
+out
+
+.yarn/
+.yarnrc.yml
+
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+/broadcast
+
+# Docs
+docs/
+
+# Dotenv file
+.env
+src/artifacts/
+.deploys/
+.states/
