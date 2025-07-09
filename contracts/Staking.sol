@@ -26,6 +26,7 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
 
     // pid => unstakeIndex => info
     mapping(uint256 => mapping(uint256 => UnstakeInfo)) public unstakeAtIndex;
+
     // pid => user address => set
     mapping(uint256 => mapping(address => EnumerableSet.UintSet)) unstakesOfUser;
 
@@ -203,7 +204,7 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
                 continue;
             }
             if (!unstakesOfUser[_pid][msg.sender].remove(unstakeIndexList[i])) revert AlreadyWithdrawed();
-            totalWithdrawAmount = totalWithdrawAmount + unstakeInfo.amount;
+            totalWithdrawAmount += unstakeInfo.amount;
 
             emit Withdraw(msg.sender, _pid, unstakeInfo.amount);
         }
@@ -221,19 +222,20 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
 
         user.updateReward(pool.rewardPerShare);
 
-        if (user.reward > 0) {
+        uint256 claimAmount = user.reward;
+        user.reward = 0;
+
+        if (claimAmount > 0) {
             if (restake) {
-                pool.totalStake += user.reward;
-                user.amount += user.reward;
+                pool.totalStake += claimAmount;
+                user.amount += claimAmount;
 
                 user.updateRewardDebt(pool.rewardPerShare);
             } else {
-                IERC20(pool.stakeToken).safeTransfer(msg.sender, user.reward);
+                IERC20(pool.stakeToken).safeTransfer(msg.sender, claimAmount);
             }
 
-            emit Claim(msg.sender, _pid, user.reward);
-
-            user.reward = 0;
+            emit Claim(msg.sender, _pid, claimAmount);
         }
     }
 }
