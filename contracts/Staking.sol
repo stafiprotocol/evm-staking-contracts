@@ -2,6 +2,9 @@ pragma solidity 0.8.19;
 
 // SPDX-License-Identifier: GPL-3.0-only
 import "./base/Ownable.sol";
+import "./base/Types.sol";
+import "./base/PoolLib.sol";
+import "./base/UserLib.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -10,40 +13,11 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 contract Staking is Initializable, UUPSUpgradeable, Ownable {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.UintSet;
+    using PoolLib for PoolInfo;
+    using UserLib for UserInfo;
 
     uint256 public constant MIN_STAKE_AMOUNT = 1e9;
     uint256 public constant UNSTAKE_TIMES_LIMIT = 100;
-
-    struct UserInfo {
-        uint256 amount;
-        uint256 reward;
-        uint256 rewardDebt;
-    }
-
-    struct PoolInfo {
-        address admin;
-        IERC20 stakeToken;
-        uint256 minStakeAmount;
-        uint256 rewardRate;
-        uint256 totalStake;
-        RewardAlgorithm rewardAlgorithm;
-        uint256 totalReward;
-        uint256 undistributedReward;
-        uint256 lastRewardTimestamp;
-        uint256 rewardPerShare;
-        uint256 unbondingSeconds;
-        uint256 nextUnstakeIndex;
-    }
-
-    struct UnstakeInfo {
-        uint256 amount;
-        uint256 withdrawableTimestamp;
-    }
-
-    enum RewardAlgorithm {
-        FixedPerTokenPerSecond,
-        FixedTotalPerSecond
-    }
 
     PoolInfo[] public poolInfo;
 
@@ -82,7 +56,7 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
         UserInfo memory user = userInfo[_pid][_user];
         uint256 rewardPerShare = pool.rewardPerShare;
         if (block.timestamp > pool.lastRewardTimestamp && pool.totalStake > 0) {
-            uint256 reward = _getPoolReward(pool);
+            uint256 reward = pool.getPoolReward();
             rewardPerShare += reward * 1e12 / pool.totalStake;
         }
         return user.amount * rewardPerShare / 1e12 - user.rewardDebt;
@@ -137,7 +111,7 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
         PoolInfo storage pool = poolInfo[_pid];
         if (pool.admin != msg.sender) revert CallerNotAllowed();
 
-        _updatePool(_pid);
+        pool.updatePool();
 
         pool.stakeToken.safeTransferFrom(address(msg.sender), address(this), _amount);
 
@@ -160,9 +134,9 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
     }
 
     function updateRewardRate(uint256 _pid, uint256 _rewardRate, RewardAlgorithm _rewardAlgorithm) public {
-        _updatePool(_pid);
         PoolInfo storage pool = poolInfo[_pid];
         if (pool.admin != msg.sender) revert CallerNotAllowed();
+        pool.updatePool();
 
         pool.rewardRate = _rewardRate;
         pool.rewardAlgorithm = _rewardAlgorithm;
@@ -176,19 +150,16 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
 
-        _updatePool(_pid);
-
-        if (user.amount > 0) {
-            uint256 pending = user.amount * pool.rewardPerShare / 1e12 - user.rewardDebt;
-            user.reward += pending;
-        }
-
         pool.stakeToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+
+        pool.updatePool();
+
+        user.updateReward(pool.rewardPerShare);
 
         user.amount += _amount;
         pool.totalStake += _amount;
 
-        user.rewardDebt = user.amount * pool.rewardPerShare / 1e12;
+        user.updateRewardDebt(pool.rewardPerShare);
 
         emit Stake(msg.sender, _pid, _amount);
     }
@@ -201,16 +172,14 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
 
         if (_amount == 0 || user.amount < _amount) revert AmountNotMatch();
 
-        _updatePool(_pid);
+        pool.updatePool();
 
-        uint256 pending = user.amount * pool.rewardPerShare / 1e12 - user.rewardDebt;
+        user.updateReward(pool.rewardPerShare);
 
-        user.reward += pending;
         user.amount -= _amount;
         pool.totalStake -= _amount;
-        pool.stakeToken.safeTransfer(address(msg.sender), _amount);
 
-        user.rewardDebt = user.amount * pool.rewardPerShare / 1e12;
+        user.updateRewardDebt(pool.rewardPerShare);
 
         // unstake info
         uint256 willUseUnstakeIndex = pool.nextUnstakeIndex;
@@ -248,17 +217,16 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
 
-        _updatePool(_pid);
+        pool.updatePool();
 
-        if (user.amount > 0) {
-            uint256 pending = user.amount * pool.rewardPerShare / 1e12 - user.rewardDebt;
-            user.reward += pending;
-        }
+        user.updateReward(pool.rewardPerShare);
 
         if (user.reward > 0) {
             if (restake) {
+                pool.totalStake += user.reward;
                 user.amount += user.reward;
-                user.rewardDebt = user.amount * pool.rewardPerShare / 1e12;
+
+                user.updateRewardDebt(pool.rewardPerShare);
             } else {
                 IERC20(pool.stakeToken).safeTransfer(msg.sender, user.reward);
             }
@@ -266,43 +234,6 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
             emit Claim(msg.sender, _pid, user.reward);
 
             user.reward = 0;
-        }
-    }
-
-    // ------------ helper ------------
-    function _updatePool(uint256 _pid) public {
-        PoolInfo storage pool = poolInfo[_pid];
-        if (block.timestamp <= pool.lastRewardTimestamp) {
-            return;
-        }
-        if (pool.totalStake == 0) {
-            pool.lastRewardTimestamp = block.timestamp;
-            return;
-        }
-        uint256 reward = _getPoolReward(pool);
-
-        if (reward > 0) {
-            pool.undistributedReward = pool.undistributedReward - reward;
-            pool.rewardPerShare += reward * 1e12 / pool.totalStake;
-        }
-        pool.lastRewardTimestamp = block.timestamp;
-    }
-
-    function _safeTransfer(address _token, address _to, uint256 _amount) internal {
-        uint256 bal = IERC20(_token).balanceOf(address(this));
-        require(bal >= _amount, "balance not enough");
-        IERC20(_token).safeTransfer(_to, _amount);
-    }
-
-    function _getPoolReward(PoolInfo memory pool) public view returns (uint256) {
-        if (pool.rewardAlgorithm == RewardAlgorithm.FixedPerTokenPerSecond) {
-            uint256 amount = pool.totalStake * (block.timestamp - pool.lastRewardTimestamp) * pool.rewardRate / 1e18;
-            return pool.undistributedReward < amount ? pool.undistributedReward : amount;
-        } else if (pool.rewardAlgorithm == RewardAlgorithm.FixedTotalPerSecond) {
-            uint256 amount = (block.timestamp - pool.lastRewardTimestamp) * pool.rewardRate;
-            return pool.undistributedReward < amount ? pool.undistributedReward : amount;
-        } else {
-            revert RewardAlgorithmNotSupport();
         }
     }
 }
