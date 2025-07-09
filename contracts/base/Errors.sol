@@ -8,4 +8,8 @@ interface Errors {
 
     error CallerNotAllowed();
     error FailedToCall();
+    error AmountNotMatch();
+
+    error AlreadyWithdrawed();
+    error RewardAlgorithmNotSupport();
 }
