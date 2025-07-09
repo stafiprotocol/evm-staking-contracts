@@ -12,6 +12,7 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
     using EnumerableSet for EnumerableSet.UintSet;
 
     uint256 public constant MIN_STAKE_AMOUNT = 1e9;
+    uint256 public constant UNSTAKE_TIMES_LIMIT = 100;
 
     struct UserInfo {
         uint256 amount;
@@ -91,8 +92,16 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
         return poolInfo.length;
     }
 
-    function getUnstakeIndexListOf(uint256 _pid, address _staker) public view virtual returns (uint256[] memory) {
+    function getUnstakeIndexListOf(uint256 _pid, address _staker) public view returns (uint256[] memory) {
         return unstakesOfUser[_pid][_staker].values();
+    }
+
+    function getUserInfo(uint256 _pid, address _staker) public view returns (UserInfo memory) {
+        return userInfo[_pid][_staker];
+    }
+
+    function getPoolInfo(uint256 _pid) public view returns (PoolInfo memory) {
+        return poolInfo[_pid];
     }
 
     // ------------ pool creater ------------
@@ -185,6 +194,8 @@ contract Staking is Initializable, UUPSUpgradeable, Ownable {
     }
 
     function unstake(uint256 _pid, uint256 _amount) public {
+        if (unstakesOfUser[_pid][msg.sender].length() >= UNSTAKE_TIMES_LIMIT) revert UnstakeTimesExceedLimit();
+
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
 

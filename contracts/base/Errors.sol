@@ -12,4 +12,5 @@ interface Errors {
 
     error AlreadyWithdrawed();
     error RewardAlgorithmNotSupport();
+    error UnstakeTimesExceedLimit();
 }
