@@ -1,10 +1,12 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.19;
 
 import "./Types.sol";
 import "./Errors.sol";
 
 library PoolLib {
+    using PoolLib for PoolInfo;
+
     function updatePool(PoolInfo storage self) internal {
         if (block.timestamp <= self.lastRewardTimestamp) {
             return;
@@ -13,7 +15,7 @@ library PoolLib {
             self.lastRewardTimestamp = block.timestamp;
             return;
         }
-        uint256 reward = PoolLib.getPoolRewardWithStorage(self);
+        uint256 reward = self.getPoolRewardWithStorage();
 
         if (reward > 0) {
             self.undistributedReward = self.undistributedReward - reward;

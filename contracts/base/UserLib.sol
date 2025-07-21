@@ -2,7 +2,6 @@
 pragma solidity 0.8.19;
 
 import "./Types.sol";
-import "./Errors.sol";
 
 library UserLib {
     function updateReward(UserInfo storage self, uint256 _rewardPerShare) internal {
