@@ -15,13 +15,10 @@ contract DeployStakingScript is Script {
         // deploy logic contracts
         address stakingLogic = address(new Staking());
 
+        bytes memory data = abi.encodeWithSelector(Staking.initialize.selector);
+
         // deploy proxy contracts
-        address stakingProxy = address(new ERC1967Proxy(stakingLogic, ""));
-
-        Staking staking = Staking(payable(stakingProxy));
-
-        // initialize proxy contract
-        staking.initialize();
+        address stakingProxy = address(new ERC1967Proxy(stakingLogic, data));
 
         console.log("Staking Proxy deployed at:", address(stakingProxy));
 
